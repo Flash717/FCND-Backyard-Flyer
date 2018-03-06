@@ -38,22 +38,28 @@ class BackyardFlyer(Drone):
         self.register_callback(MsgID.LOCAL_VELOCITY, self.velocity_callback)
         self.register_callback(MsgID.STATE, self.state_callback)
 
+    @property
+    def altitude(self):
+        return -self.local_position[2]
+
     def local_position_callback(self):
         if self.flight_state == States.TAKEOFF:
             # if we are close to target_altitude then get the list of waypoints and start processing
-            if self.local_position[2] > 0.95 * self.target_altitude:
+            # note negative value -> relative to origin
+            target_value = 0.95 * self.target_altitude
+            print('local: {}, target: {}'.format(self.local_position[2], target_value))
+            if self.altitude > target_value:
                 self.all_waypoints = self.calculate_box()
                 self.waypoint_transition()
         elif self.flight_state == States.WAYPOINT:
-            if abs(self.target_position[0] - self.local_position[0]) < self.approximation &
-               abs(self.target_position[1] - self.local_position[1]) < self.approximation:
+            if ((abs(self.target_position[0] - self.local_position[0]) < self.approximation) & (abs(self.target_position[1] - self.local_position[1]) < self.approximation)):
                if len(self.all_waypoints) > 0:
                    self.waypoint_transition()
 
                else:
                    # if we are close to the 'origin' 0 0 then land
-                   if abs(self.local_position[0]) < self.approximation &
-                        abs(self.local_position[1]) < self.approximation:
+                   if ((abs(self.local_position[0]) < self.approximation) &
+                        (abs(self.local_position[1]) < self.approximation)):
                       self.landing_transition()
 
 
@@ -64,7 +70,9 @@ class BackyardFlyer(Drone):
         This triggers when `MsgID.LOCAL_VELOCITY` is received and self.local_velocity contains new data
         """
         if self.flight_state == States.LANDING:
-            self.disarming_transition()
+            # for soft landing
+            if self.altitude < 0.1:
+                self.disarming_transition()
 
     def state_callback(self):
         """
@@ -77,17 +85,18 @@ class BackyardFlyer(Drone):
                 if self.armed == True:
                     self.takeoff_transition()
             elif self.flight_state == States.DISARMING:
-                if (self.armed == False) & (self.guided == False):
+                if (self.armed == False):
                     self.manual_transition()
             elif self.flight_state == States.MANUAL:
                 self.arming_transition()
 
     def calculate_box(self):
         # fly right up left, back home
-        result = [[0.0, 10.0, 3.0],[10.0,10.0,3.0], [10.0, 0.0, 3.0], [0.0,0.0,3.0]]
+        result = [[0.0, 0.0, 3.0],[10.0, 0.0, 3.0], [10.0, 10.0, 3.0], [0.0, 10.0, 3.0]]
         return result
 
     def arming_transition(self):
+        print('arming')
         self.take_control()
         self.arm()
         self.set_home_position(self.global_position[0],
@@ -96,21 +105,27 @@ class BackyardFlyer(Drone):
         self.flight_state = States.ARMING
 
     def takeoff_transition(self):
+        print('takeoff')
         self.target_altitude = 3.0
         self.target_position[2] = self.target_altitude
         self.takeoff(self.target_position[2])
         self.flight_state = States.TAKEOFF
 
     def waypoint_transition(self):
-        self.target_position = self.all_waypoints.pop(0)
+        print('waypoint')
+        print('local_position state:{}, 0: {}, 1: {}, 2: {}'.format(self.flight_state, self.local_position[0], self.local_position[1], self.local_position[2]))
+        self.target_position = self.all_waypoints.pop()
+        print('target_position {}'.format(self.target_position))
         self.cmd_position(self.target_position[0], self.target_position[1], self.target_position[2], 0.0)
         self.flight_state = States.WAYPOINT
 
     def landing_transition(self):
+        print('landing')
         self.land()
         self.flight_state = States.LANDING
 
     def disarming_transition(self):
+        print('disarming')
         self.disarm()
         self.flight_state = States.DISARMING
 
